@@ -176,15 +176,8 @@ function isUncommitted(source: SourceNode): boolean {
     return source.value !== source.committedValue
 }
 
-function isInvalidatedOrUncommitted(node: Node): boolean {
-    switch (node.type) {
-        case NodeType.VALUE:
-            return isUncommitted(node)
-        case NodeType.DERIVED:
-            return isUncommitted(node) || isInvalidated(node)
-        case NodeType.LISTENER:
-            return isInvalidated(node)
-    }
+function isInvalidatedOrUncommitted(source: SourceNode): boolean {
+    return isUncommitted(source) || (source.type === NodeType.DERIVED && isInvalidated(source))
 }
 
 export function setValue<T>(valueNode: ValueNode<T>, value: T) {
@@ -403,15 +396,14 @@ export function getValueTracked<T>(source: SourceNode<T>): T {
 }
 
 export function getValue<T>(source: SourceNode<T>): T {
-    switch (source.type) {
-        case NodeType.VALUE:
-            return EXECUTION.rollback ? source.committedValue : source.value
-        case NodeType.DERIVED:
-            if (EXECUTION.rollback) {
-                return unwrapCache(source.committedValue)
-            }
-            recompute(source)
-            return unwrapCache(source.value)
+    if (source.type === NodeType.VALUE) {
+        return EXECUTION.rollback ? source.committedValue : source.value
+    } else {
+        if (EXECUTION.rollback) {
+            return unwrapCache(source.committedValue)
+        }
+        recompute(source)
+        return unwrapCache(source.value)
     }
 }
 
