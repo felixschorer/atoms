@@ -1,30 +1,30 @@
-const enum CacheType {
+export const enum CacheType {
     VALUE,
     ERROR,
     UNINITIALIZED,
 }
 
-interface CachedValue<T> {
+export interface CachedValue<T> {
     type: CacheType.VALUE
     value: T
     error: null
 }
 
-interface CachedError {
+export interface CachedError {
     type: CacheType.ERROR
     value: null
     error: unknown
 }
 
-interface Uninitialized {
+export interface Uninitialized {
     type: CacheType.UNINITIALIZED
     value: null
     error: null
 }
 
-type Cache<T = unknown> = CachedValue<T> | CachedError | Uninitialized
+export type Cache<T = unknown> = CachedValue<T> | CachedError | Uninitialized
 
-const enum NodeType {
+export const enum NodeType {
     VALUE,
     DERIVED,
     LISTENER,
@@ -50,25 +50,25 @@ interface TargetCommon {
     running: boolean
 }
 
-interface ValueNode<T = unknown> extends SourceCommon<T> {
+export interface ValueNode<T = unknown> extends SourceCommon<T> {
     type: NodeType.VALUE
 }
 
-interface DerivedNode<T = unknown> extends SourceCommon<Cache<T>>, TargetCommon {
+export interface DerivedNode<T = unknown> extends SourceCommon<Cache<T>>, TargetCommon {
     type: NodeType.DERIVED
     /** function to derive a new value */
     derive: () => T
 }
 
-interface ListenerNode extends TargetCommon {
+export interface ListenerNode extends TargetCommon {
     type: NodeType.LISTENER
     /** callback to notify the listener that the tracked sources have changed */
     notify: () => void
 }
 
-type Node<T = unknown> = ValueNode<T> | DerivedNode<T> | ListenerNode
-type SourceNode<T = unknown> = ValueNode<T> | DerivedNode<T>
-type TargetNode = DerivedNode | ListenerNode
+export type Node<T = unknown> = ValueNode<T> | DerivedNode<T> | ListenerNode
+export type SourceNode<T = unknown> = ValueNode<T> | DerivedNode<T>
+export type TargetNode = DerivedNode | ListenerNode
 
 interface ExecutionContext {
     /** current target for tracking sources */
@@ -94,7 +94,7 @@ const EXECUTION: ExecutionContext = {
     rollback: false,
 }
 
-const UPDATE: UpdateContext = {
+export const UPDATE: UpdateContext = {
     batched: false,
     uncommittedSourceNodes: new Set(),
     invalidatedListenerNodes: new Set(),
@@ -203,7 +203,14 @@ export function setValue<T>(valueNode: ValueNode<T>, value: T) {
     }
 }
 
-function runListeners() {
+export function commitSources() {
+    for (const source of UPDATE.uncommittedSourceNodes) {
+        UPDATE.uncommittedSourceNodes.delete(source)
+        source.committedValue = source.value
+    }
+}
+
+export function runListeners() {
     for (const listener of UPDATE.invalidatedListenerNodes) {
         UPDATE.invalidatedListenerNodes.delete(listener)
         runListener(listener)
@@ -221,6 +228,12 @@ function runListener(listener: ListenerNode) {
 
     listener.invalidatedSourcesCount = 0
     listener.notify()
+}
+
+export function disposeListener(listener: ListenerNode) {
+    for (const source of listener.sources) {
+        unsubscribe(source, listener)
+    }
 }
 
 function invalidate(source: SourceNode): void {
