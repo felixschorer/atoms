@@ -1,7 +1,7 @@
 import {
     commitSources,
     DerivedNode,
-    disposeListener,
+    dispose,
     getValue,
     getValueTracked,
     ListenerNode,
@@ -92,7 +92,7 @@ export class Effect {
     }
 
     dispose(): void {
-        disposeListener(this._node)
+        dispose(this._node)
     }
 }
 

@@ -30,7 +30,7 @@ export const enum NodeType {
     LISTENER,
 }
 
-interface SourceCommon<T> {
+export interface SourceCommon<T> {
     /** current, possibly uncommitted value */
     value: T
     /** must be referentially equal to {@link value} when in committed state */
@@ -39,7 +39,7 @@ interface SourceCommon<T> {
     targets: Map<WeakRef<TargetNode>, number>
 }
 
-interface TargetCommon {
+export interface TargetCommon {
     /** weak self reference */
     weakRef: WeakRef<this>
     /** sources which are tracked by the target */
@@ -66,11 +66,10 @@ export interface ListenerNode extends TargetCommon {
     notify: () => void
 }
 
-export type Node<T = unknown> = ValueNode<T> | DerivedNode<T> | ListenerNode
 export type SourceNode<T = unknown> = ValueNode<T> | DerivedNode<T>
 export type TargetNode = DerivedNode | ListenerNode
 
-interface ExecutionContext {
+export interface ExecutionContext {
     /** current target for tracking sources */
     currentTarget: TargetNode | null
     /** index into the sources array of {@link currentTarget} */
@@ -79,16 +78,16 @@ interface ExecutionContext {
     rollback: boolean
 }
 
-interface UpdateContext {
+export interface UpdateContext {
     /** flag whether a batch is currently active */
     batched: boolean
     /** sources which need to be committed at the end of the batch */
-    uncommittedSourceNodes: Set<SourceNode>
+    uncommittedSources: Set<SourceNode>
     /** listeners which need to be executed at the end of the batch */
-    invalidatedListenerNodes: Set<ListenerNode>
+    invalidatedListeners: Set<ListenerNode>
 }
 
-const EXECUTION: ExecutionContext = {
+export const EXECUTION: ExecutionContext = {
     currentTarget: null,
     sourceIndex: 0,
     rollback: false,
@@ -96,8 +95,8 @@ const EXECUTION: ExecutionContext = {
 
 export const UPDATE: UpdateContext = {
     batched: false,
-    uncommittedSourceNodes: new Set(),
-    invalidatedListenerNodes: new Set(),
+    uncommittedSources: new Set(),
+    invalidatedListeners: new Set(),
 }
 
 export function runInContext<T>(target: TargetNode, fn: () => T): T {
@@ -168,15 +167,15 @@ export function makeListenerNode(notify: () => void) {
     return node
 }
 
-function isInvalidated(target: TargetNode): boolean {
+export function isInvalidated(target: TargetNode): boolean {
     return target.invalidatedSourcesCount > 0
 }
 
-function isUncommitted(source: SourceNode): boolean {
+export function isUncommitted(source: SourceNode): boolean {
     return source.value !== source.committedValue
 }
 
-function isInvalidatedOrUncommitted(source: SourceNode): boolean {
+export function isInvalidatedOrUncommitted(source: SourceNode): boolean {
     return isUncommitted(source) || (source.type === NodeType.DERIVED && isInvalidated(source))
 }
 
@@ -187,30 +186,30 @@ export function setValue<T>(valueNode: ValueNode<T>, value: T) {
 
     if (!UPDATE.batched) {
         valueNode.committedValue = value
-        invalidate(valueNode)
+        markAsInvalid(valueNode)
         runListeners()
     } else if (valueNode.committedValue === value) {
-        revalidate(valueNode)
+        markAsValid(valueNode)
     } else {
-        invalidate(valueNode)
+        markAsInvalid(valueNode)
     }
 }
 
 export function commitSources() {
-    for (const source of UPDATE.uncommittedSourceNodes) {
-        UPDATE.uncommittedSourceNodes.delete(source)
+    for (const source of UPDATE.uncommittedSources) {
+        UPDATE.uncommittedSources.delete(source)
         source.committedValue = source.value
     }
 }
 
 export function runListeners() {
-    for (const listener of UPDATE.invalidatedListenerNodes) {
-        UPDATE.invalidatedListenerNodes.delete(listener)
+    for (const listener of UPDATE.invalidatedListeners) {
+        UPDATE.invalidatedListeners.delete(listener)
         runListener(listener)
     }
 }
 
-function runListener(listener: ListenerNode) {
+export function runListener(listener: ListenerNode) {
     for (const source of listener.sources) {
         if (!isInvalidated(listener)) return
 
@@ -223,13 +222,13 @@ function runListener(listener: ListenerNode) {
     listener.notify()
 }
 
-export function disposeListener(listener: ListenerNode) {
+export function dispose(listener: ListenerNode) {
     for (const source of listener.sources) {
         unsubscribe(source, listener)
     }
 }
 
-function invalidate(source: SourceNode): void {
+export function markAsInvalid(source: SourceNode): void {
     if (source.type === NodeType.DERIVED && isInvalidated(source)) return
     if (source.type === NodeType.DERIVED && isUncommitted(source)) return rollback(source)
 
@@ -240,9 +239,9 @@ function invalidate(source: SourceNode): void {
             continue
         }
         if (target.type === NodeType.DERIVED) {
-            invalidate(target)
+            markAsInvalid(target)
         } else {
-            UPDATE.invalidatedListenerNodes.add(target)
+            UPDATE.invalidatedListeners.add(target)
         }
         // Increase count only after recursively calling invalidate.
         // Otherwise, DerivedNodes won't pass the above isInvalidated check.
@@ -250,7 +249,7 @@ function invalidate(source: SourceNode): void {
     }
 }
 
-function revalidate(source: SourceNode) {
+export function markAsValid(source: SourceNode) {
     for (const [targetRef, subscriptionCount] of source.targets) {
         const target = targetRef.deref()
         if (!target) {
@@ -262,13 +261,13 @@ function revalidate(source: SourceNode) {
         } else {
             target.invalidatedSourcesCount -= subscriptionCount
             if (target.type === NodeType.DERIVED && isInvalidated(target)) {
-                revalidate(target)
+                markAsValid(target)
             }
         }
     }
 }
 
-function recompute<T>(derived: DerivedNode<T>): void {
+export function recompute<T>(derived: DerivedNode<T>): void {
     if (derived.value.type !== CacheType.UNINITIALIZED && !isInvalidated(derived)) return
     try {
         const value = runInContext(derived, derived.derive)
@@ -277,13 +276,13 @@ function recompute<T>(derived: DerivedNode<T>): void {
             (derived.value.value === value || !isInvalidated(derived))
 
         if (unchanged) {
-            revalidate(derived)
+            markAsValid(derived)
         } else {
             setDerivedValue(derived, value)
         }
     } catch (error) {
         if (derived.value.type === CacheType.ERROR && !isInvalidated(derived)) {
-            revalidate(derived)
+            markAsValid(derived)
         } else {
             setDerivedError(derived, error)
         }
@@ -292,7 +291,7 @@ function recompute<T>(derived: DerivedNode<T>): void {
     }
 }
 
-function setDerivedValue<T>(derived: DerivedNode<T>, value: T): void {
+export function setDerivedValue<T>(derived: DerivedNode<T>, value: T): void {
     if (UPDATE.batched) {
         derived.value = { type: CacheType.VALUE, value, error: null }
     } else {
@@ -302,7 +301,7 @@ function setDerivedValue<T>(derived: DerivedNode<T>, value: T): void {
     }
 }
 
-function setDerivedError(derived: DerivedNode, error: unknown): void {
+export function setDerivedError(derived: DerivedNode, error: unknown): void {
     if (UPDATE.batched) {
         derived.value = { type: CacheType.ERROR, value: null, error }
     } else {
@@ -312,7 +311,7 @@ function setDerivedError(derived: DerivedNode, error: unknown): void {
     }
 }
 
-function setDerivedUninitialized(derived: DerivedNode): void {
+export function setUninitialized(derived: DerivedNode): void {
     if (UPDATE.batched) {
         derived.value = { type: CacheType.UNINITIALIZED, value: null, error: null }
     } else {
@@ -322,7 +321,7 @@ function setDerivedUninitialized(derived: DerivedNode): void {
     }
 }
 
-function rollback(derived: DerivedNode): void {
+export function rollback(derived: DerivedNode): void {
     derived.value = derived.committedValue
 
     EXECUTION.rollback = true
@@ -339,7 +338,7 @@ function rollback(derived: DerivedNode): void {
     }
 
     if (!isInvalidated(derived)) {
-        return revalidate(derived)
+        return markAsValid(derived)
     }
 
     for (const targetRef of derived.targets.keys()) {
@@ -352,7 +351,7 @@ function rollback(derived: DerivedNode): void {
     }
 }
 
-function subscribe(source: SourceNode, target: TargetNode) {
+export function subscribe(source: SourceNode, target: TargetNode) {
     const subscriptionCount = source.targets.get(target.weakRef)
     if (!subscriptionCount) {
         source.targets.set(target.weakRef, 1)
@@ -361,7 +360,7 @@ function subscribe(source: SourceNode, target: TargetNode) {
     }
 }
 
-function unsubscribe(source: SourceNode, target: TargetNode) {
+export function unsubscribe(source: SourceNode, target: TargetNode) {
     const subscriptionCount = source.targets.get(target.weakRef)
     if (!subscriptionCount) {
         return
@@ -373,7 +372,7 @@ function unsubscribe(source: SourceNode, target: TargetNode) {
             for (const upstream of source.sources) {
                 unsubscribe(upstream, source)
             }
-            setDerivedUninitialized(source)
+            setUninitialized(source)
             source.sources.length = 0
         }
     }
@@ -407,7 +406,7 @@ export function getValue<T>(source: SourceNode<T>): T {
     }
 }
 
-function unwrapCache<T>(cache: Cache<T>): T {
+export function unwrapCache<T>(cache: Cache<T>): T {
     switch (cache.type) {
         case CacheType.VALUE:
             return cache.value
