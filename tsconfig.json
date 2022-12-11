@@ -1,11 +1,12 @@
 {
   "compilerOptions": {
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "moduleResolution": "node",
     "esModuleInterop": true,
     "target": "ES6",
     "sourceMap": true,
-    "lib": ["ES6"]
+    "lib": ["ES6", "ES2021.WeakRef"]
   },
   "exclude": [
     "node_modules",
