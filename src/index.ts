@@ -65,7 +65,7 @@ export function derivedAtom<T>(derive: () => T): DerivedAtom<T> {
 export type Destructor = () => void
 
 export class Effect {
-    static readonly effects: Effect[] = []
+    static readonly activeEffects = new Set<Effect>()
 
     static errorHandler = (error: unknown) =>
         queueMicrotask(() => {
@@ -76,6 +76,7 @@ export class Effect {
     private _destructor: Destructor | null = null
 
     constructor(sideEffect: () => void | Destructor) {
+        Effect.activeEffects.add(this)
         this._node = makeListenerNode(() => {
             try {
                 this._destructor?.()
@@ -89,6 +90,7 @@ export class Effect {
     }
 
     dispose(): void {
+        Effect.activeEffects.delete(this)
         dispose(this._node)
     }
 }
