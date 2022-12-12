@@ -1,6 +1,5 @@
 import {
     getValue,
-    getValueTracked,
     makeDerivedNode,
     makeListenerNode,
     makeValueNode,
@@ -14,7 +13,7 @@ describe("hazardous materials", () => {
 
         const valueNode = makeValueNode(0)
         const listenerNode = makeListenerNode(() => callback(getValue(valueNode)))
-        runInContext(listenerNode, () => getValueTracked(valueNode))
+        runInContext(listenerNode, () => getValue(valueNode))
 
         setValue(valueNode, 0)
         setValue(valueNode, 1)
@@ -27,9 +26,9 @@ describe("hazardous materials", () => {
         const callback = jest.fn()
 
         const valueNode = makeValueNode(0)
-        const derivedNode = makeDerivedNode(() => getValueTracked(valueNode) * 2)
+        const derivedNode = makeDerivedNode(() => getValue(valueNode) * 2)
         const listenerNode = makeListenerNode(() => callback(getValue(derivedNode)))
-        runInContext(listenerNode, () => getValueTracked(derivedNode))
+        runInContext(listenerNode, () => getValue(derivedNode))
 
         setValue(valueNode, 0)
         setValue(valueNode, 1)
@@ -42,10 +41,10 @@ describe("hazardous materials", () => {
         const callback = jest.fn()
 
         const valueNode = makeValueNode(0)
-        const derivedNode1 = makeDerivedNode(() => getValueTracked(valueNode) & 0)
-        const derivedNode2 = makeDerivedNode(() => getValueTracked(derivedNode1))
+        const derivedNode1 = makeDerivedNode(() => getValue(valueNode) & 0)
+        const derivedNode2 = makeDerivedNode(() => getValue(derivedNode1))
         const listenerNode = makeListenerNode(() => callback(getValue(derivedNode2)))
-        runInContext(listenerNode, () => getValueTracked(derivedNode2))
+        runInContext(listenerNode, () => getValue(derivedNode2))
 
         setValue(valueNode, 0)
         setValue(valueNode, 1)
@@ -58,14 +57,14 @@ describe("hazardous materials", () => {
         const callback = jest.fn()
 
         const valueNode = makeValueNode(0)
-        const derivedNode1 = makeDerivedNode(() => getValueTracked(valueNode) * 2)
-        const derivedNode2 = makeDerivedNode(() => getValueTracked(valueNode) * 5)
+        const derivedNode1 = makeDerivedNode(() => getValue(valueNode) * 2)
+        const derivedNode2 = makeDerivedNode(() => getValue(valueNode) * 5)
         const listenerNode = makeListenerNode(() =>
             callback(getValue(derivedNode1), getValue(derivedNode2)),
         )
         runInContext(listenerNode, () => {
-            getValueTracked(derivedNode1)
-            getValueTracked(derivedNode2)
+            getValue(derivedNode1)
+            getValue(derivedNode2)
         })
 
         setValue(valueNode, 0)

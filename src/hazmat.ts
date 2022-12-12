@@ -58,12 +58,16 @@ export interface DerivedNode<T = unknown> extends SourceCommon<Cache<T>>, Target
     type: NodeType.DERIVED
     /** function to derive a new value */
     derive: () => T
+    /** flag whether the node is currently being rolled back */
+    rollback: boolean
 }
 
 export interface ListenerNode extends TargetCommon {
     type: NodeType.LISTENER
     /** callback to notify the listener that the tracked sources have changed */
     notify: () => void
+    /** flag whether the node is currently tracking dependencies */
+    tracking: boolean
 }
 
 export type SourceNode<T = unknown> = ValueNode<T> | DerivedNode<T>
@@ -74,8 +78,6 @@ export interface ExecutionContext {
     currentTarget: TargetNode | null
     /** index into the sources array of {@link currentTarget} */
     sourceIndex: number
-    /** flag whether the current target should be rolled back */
-    rollback: boolean
 }
 
 export interface UpdateContext {
@@ -90,7 +92,6 @@ export interface UpdateContext {
 export const EXECUTION: ExecutionContext = {
     currentTarget: null,
     sourceIndex: 0,
-    rollback: false,
 }
 
 export const UPDATE: UpdateContext = {
@@ -149,6 +150,7 @@ export function makeDerivedNode<T>(derive: () => T) {
         sources: [],
         invalidatedSourcesCount: 0,
         running: false,
+        rollback: false,
     }
     node.weakRef = new WeakRef(node)
     return node
@@ -162,6 +164,7 @@ export function makeListenerNode(notify: () => void) {
         sources: [],
         invalidatedSourcesCount: 0,
         running: false,
+        tracking: true,
     }
     node.weakRef = new WeakRef(node)
     return node
@@ -325,11 +328,11 @@ export function setUninitialized(derived: DerivedNode): void {
 export function rollback(derived: DerivedNode): void {
     derived.value = derived.committedValue
 
-    EXECUTION.rollback = true
+    derived.rollback = true
     try {
         runInContext(derived, derived.derive)
     } finally {
-        EXECUTION.rollback = false
+        derived.rollback = false
         derived.invalidatedSourcesCount = 0
         for (const upstream of derived.sources) {
             if (isInvalidatedOrUncommitted(upstream)) {
@@ -379,8 +382,8 @@ export function unsubscribe(source: SourceNode, target: TargetNode) {
     }
 }
 
-export function getValueTracked<T>(source: SourceNode<T>): T {
-    if (EXECUTION.currentTarget) {
+export function getValue<T>(source: SourceNode<T>): T {
+    if (EXECUTION.currentTarget?.type === NodeType.DERIVED || EXECUTION.currentTarget?.tracking) {
         const sources = EXECUTION.currentTarget.sources
         const previousSource = sources[EXECUTION.sourceIndex]
         if (source !== previousSource) {
@@ -392,14 +395,14 @@ export function getValueTracked<T>(source: SourceNode<T>): T {
         }
         EXECUTION.sourceIndex++
     }
-    return getValue(source)
-}
 
-export function getValue<T>(source: SourceNode<T>): T {
+    const rollback =
+        EXECUTION.currentTarget?.type === NodeType.DERIVED && EXECUTION.currentTarget.rollback
+
     if (source.type === NodeType.VALUE) {
-        return EXECUTION.rollback ? source.committedValue : source.value
+        return rollback ? source.committedValue : source.value
     } else {
-        if (EXECUTION.rollback) {
+        if (rollback) {
             return unwrapCache(source.committedValue)
         }
         recompute(source)

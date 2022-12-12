@@ -2,12 +2,13 @@ import {
     commitSources,
     DerivedNode,
     dispose,
+    EXECUTION,
     getValue,
-    getValueTracked,
     ListenerNode,
     makeDerivedNode,
     makeListenerNode,
     makeValueNode,
+    NodeType,
     runInContext,
     runListeners,
     setValue,
@@ -20,10 +21,6 @@ export abstract class ReadonlyAtom<out T> {
     protected abstract readonly _node: SourceNode<T>
 
     get(): T {
-        return getValueTracked(this._node)
-    }
-
-    peek(): T {
         return getValue(this._node)
     }
 }
@@ -111,6 +108,20 @@ export function batch<T>(run: () => T): T {
             UPDATE.batched = false
             commitSources()
             runListeners()
+        }
+    }
+}
+
+export function untracked<T>(run: () => T): T {
+    const target = EXECUTION.currentTarget
+    if (target?.type === NodeType.LISTENER) {
+        target.tracking = false
+    }
+    try {
+        return run()
+    } finally {
+        if (target?.type === NodeType.LISTENER) {
+            target.tracking = true
         }
     }
 }
