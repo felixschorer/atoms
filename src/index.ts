@@ -116,13 +116,13 @@ export function batch<T>(run: () => T): T {
 
 export function untracked<T>(run: () => T): T {
     const target = EXECUTION.currentTarget
-    if (target?.type === NodeType.LISTENER) {
-        target.tracking = false
-    }
-    try {
+    if (target?.type !== NodeType.LISTENER || !target.tracking) {
         return run()
-    } finally {
-        if (target?.type === NodeType.LISTENER) {
+    } else {
+        target.tracking = false
+        try {
+            return run()
+        } finally {
             target.tracking = true
         }
     }
