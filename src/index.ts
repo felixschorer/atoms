@@ -34,6 +34,9 @@ export class Atom<in out T> extends ReadonlyAtom<T> {
     }
 
     set(value: T): T {
+        if (EXECUTION.currentTarget?.type === NodeType.DERIVED) {
+            throw new Error("Cannot set value in derived context.")
+        }
         setValue(this._node, value)
         return value
     }
@@ -76,6 +79,10 @@ export class Effect {
     private _destructor: Destructor | null = null
 
     constructor(sideEffect: () => void | Destructor) {
+        if (EXECUTION.currentTarget?.type === NodeType.DERIVED) {
+            throw new Error("Cannot use effect in derived context.")
+        }
+
         Effect.activeEffects.add(this)
         this._node = makeListenerNode(() => {
             try {
@@ -116,14 +123,17 @@ export function batch<T>(run: () => T): T {
 
 export function untracked<T>(run: () => T): T {
     const target = EXECUTION.currentTarget
-    if (target?.type !== NodeType.LISTENER || !target.tracking) {
+
+    if (target?.type === NodeType.DERIVED) {
+        throw new Error("Cannot disable tracking in derived context.")
+    }
+
+    if (!target?.tracking) return run()
+
+    target.tracking = false
+    try {
         return run()
-    } else {
-        target.tracking = false
-        try {
-            return run()
-        } finally {
-            target.tracking = true
-        }
+    } finally {
+        target.tracking = true
     }
 }

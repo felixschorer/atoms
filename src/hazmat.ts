@@ -108,10 +108,6 @@ export function runInContext<T>(target: TargetNode, fn: () => T): T {
     const parentTarget = EXECUTION.currentTarget
     const parentSourceIndex = EXECUTION.sourceIndex
 
-    if (target.type === NodeType.LISTENER && parentTarget?.type === NodeType.DERIVED) {
-        throw new Error("Side effect within derived.")
-    }
-
     target.running = true
     EXECUTION.currentTarget = target
     EXECUTION.sourceIndex = 0
