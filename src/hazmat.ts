@@ -185,12 +185,12 @@ export function setValue<T>(valueNode: ValueNode<T>, value: T) {
 
     if (!UPDATE.batched) {
         valueNode.committedValue = value
-        markAsInvalidated(valueNode)
+        invalidate(valueNode)
         runListeners()
     } else if (valueNode.committedValue === value) {
-        markAsValidated(valueNode)
+        uninvalidate(valueNode)
     } else {
-        markAsInvalidated(valueNode)
+        invalidate(valueNode)
     }
 }
 
@@ -213,7 +213,7 @@ export function runListener(listener: ListenerNode) {
 
     for (const source of listener.sources) {
         if (source.type === NodeType.DERIVED) {
-            recompute(source)
+            revalidate(source)
             if (!isInvalidated(listener)) return
         }
     }
@@ -228,7 +228,7 @@ export function dispose(listener: ListenerNode) {
     }
 }
 
-export function markAsInvalidated(source: SourceNode): void {
+export function invalidate(source: SourceNode): void {
     if (source.type === NodeType.DERIVED && isInvalidated(source)) return
     if (source.type === NodeType.DERIVED && isUncommitted(source)) return rollback(source)
 
@@ -239,7 +239,7 @@ export function markAsInvalidated(source: SourceNode): void {
             continue
         }
         if (target.type === NodeType.DERIVED) {
-            markAsInvalidated(target)
+            invalidate(target)
         } else {
             UPDATE.invalidatedListeners.add(target)
         }
@@ -249,7 +249,7 @@ export function markAsInvalidated(source: SourceNode): void {
     }
 }
 
-export function markAsValidated(source: SourceNode) {
+export function uninvalidate(source: SourceNode) {
     for (const [targetRef, subscriptionCount] of source.targets) {
         const target = targetRef.deref()
         if (!target) {
@@ -261,13 +261,13 @@ export function markAsValidated(source: SourceNode) {
         } else {
             target.invalidatedSourcesCount -= subscriptionCount
             if (target.type === NodeType.DERIVED && isInvalidated(target)) {
-                markAsValidated(target)
+                uninvalidate(target)
             }
         }
     }
 }
 
-export function recompute<T>(derived: DerivedNode<T>): void {
+export function revalidate<T>(derived: DerivedNode<T>): void {
     if (derived.value.type !== CacheType.UNINITIALIZED && !isInvalidated(derived)) return
     try {
         const value = runInContext(derived, derived.derive)
@@ -276,13 +276,13 @@ export function recompute<T>(derived: DerivedNode<T>): void {
             (derived.value.value === value || !isInvalidated(derived))
 
         if (unchanged) {
-            markAsValidated(derived)
+            uninvalidate(derived)
         } else {
             setDerivedValue(derived, value)
         }
     } catch (error) {
         if (derived.value.type === CacheType.ERROR && !isInvalidated(derived)) {
-            markAsValidated(derived)
+            uninvalidate(derived)
         } else {
             setDerivedError(derived, error)
         }
@@ -338,7 +338,7 @@ export function rollback(derived: DerivedNode): void {
     }
 
     if (!isInvalidated(derived)) {
-        return markAsValidated(derived)
+        return uninvalidate(derived)
     }
 
     for (const targetRef of derived.targets.keys()) {
@@ -401,7 +401,7 @@ export function getValue<T>(source: SourceNode<T>): T {
         if (rollback) {
             return unwrapCache(source.committedValue)
         }
-        recompute(source)
+        revalidate(source)
         return unwrapCache(source.value)
     }
 }
