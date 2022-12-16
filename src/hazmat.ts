@@ -260,7 +260,7 @@ export function uninvalidate(source: SourceNode) {
             rollback(target)
         } else {
             target.invalidatedSourcesCount -= subscriptionCount
-            if (target.type === NodeType.DERIVED && isInvalidated(target)) {
+            if (target.type === NodeType.DERIVED && !isInvalidated(target)) {
                 uninvalidate(target)
             }
         }

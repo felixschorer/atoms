@@ -76,4 +76,21 @@ describe("hazardous materials", () => {
             [4, 10],
         ])
     })
+
+    it("should not uninvalidate a derived node if at least one other source is invalid", () => {
+        const callback = jest.fn()
+
+        const valueNode = makeValueNode(0)
+        const derivedNode1 = makeDerivedNode(() => getValue(valueNode) & 0)
+        const derivedNode2 = makeDerivedNode(() => getValue(valueNode))
+        const derivedNode3 = makeDerivedNode(() => getValue(derivedNode1) + getValue(derivedNode2))
+        const listenerNode = makeListenerNode(() => callback(getValue(derivedNode3)))
+        runInContext(listenerNode, () => getValue(derivedNode3))
+
+        setValue(valueNode, 0)
+        setValue(valueNode, 1)
+        setValue(valueNode, 2)
+
+        expect(callback).toHaveBeenCalledTimes(2)
+    })
 })
