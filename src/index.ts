@@ -1,7 +1,8 @@
 import {
+    cleanupNodes,
     commitSources,
     DerivedNode,
-    dispose,
+    disposeListener,
     EXECUTION,
     getValue,
     ListenerNode,
@@ -14,6 +15,7 @@ import {
     setValue,
     SourceNode,
     UPDATE,
+    UpdateStatus,
     ValueNode,
 } from "./hazmat"
 
@@ -98,7 +100,7 @@ export class Effect {
 
     dispose(): void {
         Effect.activeEffects.delete(this)
-        dispose(this._node)
+        disposeListener(this._node)
     }
 }
 
@@ -107,15 +109,16 @@ export function effect(sideEffect: () => void | Destructor): Effect {
 }
 
 export function batch<T>(run: () => T): T {
-    if (UPDATE.batched) {
+    if (UPDATE.status === UpdateStatus.BATCHED) {
         return run()
     } else {
-        UPDATE.batched = true
+        UPDATE.status = UpdateStatus.BATCHED
         try {
             return run()
         } finally {
-            UPDATE.batched = false
+            UPDATE.status = UpdateStatus.INACTIVE
             commitSources()
+            cleanupNodes()
             runListeners()
         }
     }

@@ -80,13 +80,20 @@ export interface ExecutionContext {
     sourceIndex: number
 }
 
+export enum UpdateStatus {
+    INACTIVE,
+    ACTIVE,
+    BATCHED,
+}
+
 export interface UpdateContext {
-    /** flag whether a batch is currently active */
-    batched: boolean
+    status: UpdateStatus
     /** sources which need to be committed at the end of the batch */
     uncommittedSources: Set<SourceNode>
     /** listeners which need to be executed at the end of the batch */
     invalidatedListeners: Set<ListenerNode>
+    /** derived nodes which might be disposable */
+    possiblyInvalidatedDerived: Set<DerivedNode>
 }
 
 export const EXECUTION: ExecutionContext = {
@@ -95,9 +102,10 @@ export const EXECUTION: ExecutionContext = {
 }
 
 export const UPDATE: UpdateContext = {
-    batched: false,
+    status: UpdateStatus.INACTIVE,
     uncommittedSources: new Set(),
     invalidatedListeners: new Set(),
+    possiblyInvalidatedDerived: new Set(),
 }
 
 export function runInContext<T>(target: TargetNode, fn: () => T): T {
@@ -183,9 +191,12 @@ export function setValue<T>(valueNode: ValueNode<T>, value: T) {
 
     valueNode.value = value
 
-    if (!UPDATE.batched) {
+    if (UPDATE.status !== UpdateStatus.BATCHED) {
+        UPDATE.status = UpdateStatus.ACTIVE
         valueNode.committedValue = value
         invalidate(valueNode)
+        UPDATE.status = UpdateStatus.INACTIVE
+        cleanupNodes()
         runListeners()
     } else if (valueNode.committedValue === value) {
         uninvalidate(valueNode)
@@ -222,9 +233,30 @@ export function runListener(listener: ListenerNode) {
     listener.notify()
 }
 
-export function dispose(listener: ListenerNode) {
+export function disposeListener(listener: ListenerNode) {
     for (const source of listener.sources) {
         unsubscribe(source, listener)
+    }
+}
+
+export function checkForDisposal(derived: DerivedNode) {
+    if (!isInvalidated(derived) || derived.targets.size > 0) return
+
+    if (UPDATE.status !== UpdateStatus.INACTIVE) {
+        return UPDATE.possiblyInvalidatedDerived.add(derived)
+    }
+
+    for (const upstream of derived.sources) {
+        unsubscribe(upstream, derived)
+    }
+    setUninitialized(derived)
+    derived.sources.length = 0
+}
+
+export function cleanupNodes() {
+    for (const derived of UPDATE.possiblyInvalidatedDerived) {
+        UPDATE.possiblyInvalidatedDerived.delete(derived)
+        checkForDisposal(derived)
     }
 }
 
@@ -240,6 +272,7 @@ export function invalidate(source: SourceNode): void {
         }
         if (target.type === NodeType.DERIVED) {
             invalidate(target)
+            checkForDisposal(target)
         } else {
             UPDATE.invalidatedListeners.add(target)
         }
@@ -292,7 +325,7 @@ export function revalidate<T>(derived: DerivedNode<T>): void {
 }
 
 export function setDerivedValue<T>(derived: DerivedNode<T>, value: T): void {
-    if (UPDATE.batched) {
+    if (UPDATE.status === UpdateStatus.BATCHED) {
         derived.value = { type: CacheType.VALUE, value, error: null }
     } else {
         ;(derived.value as CachedValue<T>).type = CacheType.VALUE
@@ -302,7 +335,7 @@ export function setDerivedValue<T>(derived: DerivedNode<T>, value: T): void {
 }
 
 export function setDerivedError(derived: DerivedNode, error: unknown): void {
-    if (UPDATE.batched) {
+    if (UPDATE.status === UpdateStatus.BATCHED) {
         derived.value = { type: CacheType.ERROR, value: null, error }
     } else {
         ;(derived.value as CachedError).type = CacheType.ERROR
@@ -312,7 +345,7 @@ export function setDerivedError(derived: DerivedNode, error: unknown): void {
 }
 
 export function setUninitialized(derived: DerivedNode): void {
-    if (UPDATE.batched) {
+    if (UPDATE.status === UpdateStatus.BATCHED) {
         derived.value = { type: CacheType.UNINITIALIZED, value: null, error: null }
     } else {
         ;(derived.value as Uninitialized).type = CacheType.UNINITIALIZED
@@ -368,12 +401,8 @@ export function unsubscribe(source: SourceNode, target: TargetNode) {
         source.targets.set(target.weakRef, subscriptionCount - 1)
     } else {
         source.targets.delete(target.weakRef)
-        if (source.type === NodeType.DERIVED && isInvalidated(source)) {
-            for (const upstream of source.sources) {
-                unsubscribe(upstream, source)
-            }
-            setUninitialized(source)
-            source.sources.length = 0
+        if (source.type === NodeType.DERIVED) {
+            checkForDisposal(source)
         }
     }
 }
