@@ -1,23 +1,18 @@
 import {
-    cleanupNodes,
-    commitSources,
     DerivedNode,
-    disposeListener,
-    EXECUTION,
+    disposeEffect,
+    EffectNode,
     getValue,
-    ListenerNode,
     makeDerivedNode,
-    makeListenerNode,
+    makeEffectNode,
     makeValueNode,
-    NodeType,
     runInContext,
-    runListeners,
     setValue,
     SourceNode,
-    UPDATE,
-    UpdateStatus,
     ValueNode,
 } from "./hazmat"
+
+export { batch, untracked } from "./hazmat"
 
 export abstract class ReadonlyAtom<out T> {
     protected abstract readonly _node: SourceNode<T>
@@ -36,17 +31,12 @@ export class Atom<in out T> extends ReadonlyAtom<T> {
     }
 
     set(value: T): T {
-        if (EXECUTION.currentTarget?.type === NodeType.DERIVED) {
-            throw new Error("Cannot set value in derived context.")
-        }
-        setValue(this._node, value)
-        return value
+        return setValue(this._node, value)
     }
 
     update(map: (value: T) => T): T {
         const updatedValue = map(this.get())
-        this.set(updatedValue)
-        return updatedValue
+        return this.set(updatedValue)
     }
 }
 
@@ -77,16 +67,11 @@ export class Effect {
             throw error
         })
 
-    private readonly _node: ListenerNode
+    private readonly _node: EffectNode
     private _destructor: Destructor | null = null
 
     constructor(sideEffect: () => void | Destructor) {
-        if (EXECUTION.currentTarget?.type === NodeType.DERIVED) {
-            throw new Error("Cannot use effect in derived context.")
-        }
-
-        Effect.activeEffects.add(this)
-        this._node = makeListenerNode(() => {
+        this._node = makeEffectNode(() => {
             try {
                 this._destructor?.()
                 this._destructor = runInContext(this._node, sideEffect) ?? null
@@ -96,47 +81,15 @@ export class Effect {
             }
         })
         this._node.notify()
+        Effect.activeEffects.add(this)
     }
 
     dispose(): void {
         Effect.activeEffects.delete(this)
-        disposeListener(this._node)
+        disposeEffect(this._node)
     }
 }
 
 export function effect(sideEffect: () => void | Destructor): Effect {
     return new Effect(sideEffect)
-}
-
-export function batch<T>(run: () => T): T {
-    if (UPDATE.status === UpdateStatus.BATCHED) {
-        return run()
-    } else {
-        UPDATE.status = UpdateStatus.BATCHED
-        try {
-            return run()
-        } finally {
-            UPDATE.status = UpdateStatus.INACTIVE
-            commitSources()
-            cleanupNodes()
-            runListeners()
-        }
-    }
-}
-
-export function untracked<T>(run: () => T): T {
-    const target = EXECUTION.currentTarget
-
-    if (target?.type === NodeType.DERIVED) {
-        throw new Error("Cannot disable tracking in derived context.")
-    }
-
-    if (!target?.tracking) return run()
-
-    target.tracking = false
-    try {
-        return run()
-    } finally {
-        target.tracking = true
-    }
 }

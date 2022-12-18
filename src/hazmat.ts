@@ -27,7 +27,7 @@ export type Cache<T = unknown> = CachedValue<T> | CachedError | Uninitialized
 export const enum NodeType {
     VALUE,
     DERIVED,
-    LISTENER,
+    EFFECT,
 }
 
 export interface SourceCommon<T> {
@@ -62,49 +62,49 @@ export interface DerivedNode<T = unknown> extends SourceCommon<Cache<T>>, Target
     rollback: boolean
 }
 
-export interface ListenerNode extends TargetCommon {
-    type: NodeType.LISTENER
-    /** callback to notify the listener that the tracked sources have changed */
+export interface EffectNode extends TargetCommon {
+    type: NodeType.EFFECT
+    /** callback to notify the effect that the tracked sources have changed */
     notify: () => void
     /** flag whether the node is currently tracking dependencies */
     tracking: boolean
 }
 
 export type SourceNode<T = unknown> = ValueNode<T> | DerivedNode<T>
-export type TargetNode = DerivedNode | ListenerNode
+export type TargetNode = DerivedNode | EffectNode
 
-export interface ExecutionContext {
+interface ExecutionContext {
     /** current target for tracking sources */
     currentTarget: TargetNode | null
     /** index into the sources array of {@link currentTarget} */
     sourceIndex: number
 }
 
-export enum UpdateStatus {
+enum UpdateStatus {
     INACTIVE,
     ACTIVE,
     BATCHED,
 }
 
-export interface UpdateContext {
+interface UpdateContext {
     status: UpdateStatus
     /** sources which need to be committed at the end of the batch */
     uncommittedSources: Set<SourceNode>
-    /** listeners which need to be executed at the end of the batch */
-    invalidatedListeners: Set<ListenerNode>
+    /** effects which need to be executed at the end of the batch */
+    invalidatedEffects: Set<EffectNode>
     /** derived nodes which might be disposable */
     possiblyInvalidatedDerived: Set<DerivedNode>
 }
 
-export const EXECUTION: ExecutionContext = {
+const EXECUTION: ExecutionContext = {
     currentTarget: null,
     sourceIndex: 0,
 }
 
-export const UPDATE: UpdateContext = {
+const UPDATE: UpdateContext = {
     status: UpdateStatus.INACTIVE,
     uncommittedSources: new Set(),
-    invalidatedListeners: new Set(),
+    invalidatedEffects: new Set(),
     possiblyInvalidatedDerived: new Set(),
 }
 
@@ -160,11 +160,15 @@ export function makeDerivedNode<T>(derive: () => T) {
     return node
 }
 
-export function makeListenerNode(notify: () => void) {
-    const node: ListenerNode = {
-        type: NodeType.LISTENER,
+export function makeEffectNode(notify: () => void) {
+    if (EXECUTION.currentTarget?.type === NodeType.DERIVED) {
+        throw new Error("Cannot use effect in derived context.")
+    }
+
+    const node: EffectNode = {
+        type: NodeType.EFFECT,
         notify,
-        weakRef: null as never as WeakRef<ListenerNode>,
+        weakRef: null as never as WeakRef<EffectNode>,
         sources: [],
         invalidatedSourcesCount: 0,
         running: false,
@@ -174,20 +178,24 @@ export function makeListenerNode(notify: () => void) {
     return node
 }
 
-export function isInvalidated(target: TargetNode): boolean {
+function isInvalidated(target: TargetNode): boolean {
     return target.invalidatedSourcesCount > 0
 }
 
-export function isUncommitted(source: SourceNode): boolean {
+function isUncommitted(source: SourceNode): boolean {
     return source.value !== source.committedValue
 }
 
-export function isInvalidatedOrUncommitted(source: SourceNode): boolean {
+function isInvalidatedOrUncommitted(source: SourceNode): boolean {
     return isUncommitted(source) || (source.type === NodeType.DERIVED && isInvalidated(source))
 }
 
-export function setValue<T>(valueNode: ValueNode<T>, value: T) {
-    if (valueNode.value === value) return
+export function setValue<T>(valueNode: ValueNode<T>, value: T): T {
+    if (EXECUTION.currentTarget?.type === NodeType.DERIVED) {
+        throw new Error("Cannot set value in derived context.")
+    }
+
+    if (valueNode.value === value) return value
 
     valueNode.value = value
 
@@ -197,49 +205,51 @@ export function setValue<T>(valueNode: ValueNode<T>, value: T) {
         invalidate(valueNode)
         UPDATE.status = UpdateStatus.INACTIVE
         cleanupNodes()
-        runListeners()
+        runEffects()
     } else if (valueNode.committedValue === value) {
         uninvalidate(valueNode)
     } else {
         invalidate(valueNode)
     }
+
+    return value
 }
 
-export function commitSources() {
+function commitSources() {
     for (const source of UPDATE.uncommittedSources) {
         UPDATE.uncommittedSources.delete(source)
         source.committedValue = source.value
     }
 }
 
-export function runListeners() {
-    for (const listener of UPDATE.invalidatedListeners) {
-        UPDATE.invalidatedListeners.delete(listener)
-        runListener(listener)
+function runEffects() {
+    for (const effect of UPDATE.invalidatedEffects) {
+        UPDATE.invalidatedEffects.delete(effect)
+        runEffect(effect)
     }
 }
 
-export function runListener(listener: ListenerNode) {
-    if (!isInvalidated(listener)) return
+function runEffect(effect: EffectNode) {
+    if (!isInvalidated(effect)) return
 
-    for (const source of listener.sources) {
+    for (const source of effect.sources) {
         if (source.type === NodeType.DERIVED) {
             revalidate(source)
-            if (!isInvalidated(listener)) return
+            if (!isInvalidated(effect)) return
         }
     }
 
-    listener.invalidatedSourcesCount = 0
-    listener.notify()
+    effect.invalidatedSourcesCount = 0
+    effect.notify()
 }
 
-export function disposeListener(listener: ListenerNode) {
-    for (const source of listener.sources) {
-        unsubscribe(source, listener)
+export function disposeEffect(effect: EffectNode) {
+    for (const source of effect.sources) {
+        unsubscribe(source, effect)
     }
 }
 
-export function checkForDisposal(derived: DerivedNode) {
+function checkForDisposal(derived: DerivedNode) {
     if (!isInvalidated(derived) || derived.targets.size > 0) return
 
     if (UPDATE.status !== UpdateStatus.INACTIVE) {
@@ -253,14 +263,14 @@ export function checkForDisposal(derived: DerivedNode) {
     derived.sources.length = 0
 }
 
-export function cleanupNodes() {
+function cleanupNodes() {
     for (const derived of UPDATE.possiblyInvalidatedDerived) {
         UPDATE.possiblyInvalidatedDerived.delete(derived)
         checkForDisposal(derived)
     }
 }
 
-export function invalidate(source: SourceNode): void {
+function invalidate(source: SourceNode): void {
     if (source.type === NodeType.DERIVED && isInvalidated(source)) return
     if (source.type === NodeType.DERIVED && isUncommitted(source)) return rollback(source)
 
@@ -274,7 +284,7 @@ export function invalidate(source: SourceNode): void {
             invalidate(target)
             checkForDisposal(target)
         } else {
-            UPDATE.invalidatedListeners.add(target)
+            UPDATE.invalidatedEffects.add(target)
         }
         // Increase count only after recursively calling invalidate.
         // Otherwise, DerivedNodes won't pass the above isInvalidated check.
@@ -282,7 +292,7 @@ export function invalidate(source: SourceNode): void {
     }
 }
 
-export function uninvalidate(source: SourceNode) {
+function uninvalidate(source: SourceNode) {
     for (const [targetRef, subscriptionCount] of source.targets) {
         const target = targetRef.deref()
         if (!target) {
@@ -300,7 +310,7 @@ export function uninvalidate(source: SourceNode) {
     }
 }
 
-export function revalidate<T>(derived: DerivedNode<T>): void {
+function revalidate<T>(derived: DerivedNode<T>): void {
     if (derived.value.type !== CacheType.UNINITIALIZED && !isInvalidated(derived)) return
     try {
         const value = runInContext(derived, derived.derive)
@@ -324,7 +334,7 @@ export function revalidate<T>(derived: DerivedNode<T>): void {
     }
 }
 
-export function setDerivedValue<T>(derived: DerivedNode<T>, value: T): void {
+function setDerivedValue<T>(derived: DerivedNode<T>, value: T): void {
     if (UPDATE.status === UpdateStatus.BATCHED) {
         derived.value = { type: CacheType.VALUE, value, error: null }
     } else {
@@ -334,7 +344,7 @@ export function setDerivedValue<T>(derived: DerivedNode<T>, value: T): void {
     }
 }
 
-export function setDerivedError(derived: DerivedNode, error: unknown): void {
+function setDerivedError(derived: DerivedNode, error: unknown): void {
     if (UPDATE.status === UpdateStatus.BATCHED) {
         derived.value = { type: CacheType.ERROR, value: null, error }
     } else {
@@ -344,7 +354,7 @@ export function setDerivedError(derived: DerivedNode, error: unknown): void {
     }
 }
 
-export function setUninitialized(derived: DerivedNode): void {
+function setUninitialized(derived: DerivedNode): void {
     if (UPDATE.status === UpdateStatus.BATCHED) {
         derived.value = { type: CacheType.UNINITIALIZED, value: null, error: null }
     } else {
@@ -354,7 +364,7 @@ export function setUninitialized(derived: DerivedNode): void {
     }
 }
 
-export function rollback(derived: DerivedNode): void {
+function rollback(derived: DerivedNode): void {
     derived.value = derived.committedValue
 
     derived.rollback = true
@@ -384,7 +394,7 @@ export function rollback(derived: DerivedNode): void {
     }
 }
 
-export function subscribe(source: SourceNode, target: TargetNode) {
+function subscribe(source: SourceNode, target: TargetNode) {
     const subscriptionCount = source.targets.get(target.weakRef)
     if (!subscriptionCount) {
         source.targets.set(target.weakRef, 1)
@@ -393,7 +403,7 @@ export function subscribe(source: SourceNode, target: TargetNode) {
     }
 }
 
-export function unsubscribe(source: SourceNode, target: TargetNode) {
+function unsubscribe(source: SourceNode, target: TargetNode) {
     const subscriptionCount = source.targets.get(target.weakRef)
     if (!subscriptionCount) {
         return
@@ -435,7 +445,7 @@ export function getValue<T>(source: SourceNode<T>): T {
     }
 }
 
-export function unwrapCache<T>(cache: Cache<T>): T {
+function unwrapCache<T>(cache: Cache<T>): T {
     switch (cache.type) {
         case CacheType.VALUE:
             return cache.value
@@ -443,5 +453,38 @@ export function unwrapCache<T>(cache: Cache<T>): T {
             throw cache.error
         case CacheType.UNINITIALIZED:
             throw new Error("Unwrapping uninitialized cache.")
+    }
+}
+
+export function batch<T>(run: () => T): T {
+    if (UPDATE.status === UpdateStatus.BATCHED) {
+        return run()
+    } else {
+        UPDATE.status = UpdateStatus.BATCHED
+        try {
+            return run()
+        } finally {
+            UPDATE.status = UpdateStatus.INACTIVE
+            commitSources()
+            cleanupNodes()
+            runEffects()
+        }
+    }
+}
+
+export function untracked<T>(run: () => T): T {
+    const target = EXECUTION.currentTarget
+
+    if (target?.type === NodeType.DERIVED) {
+        throw new Error("Cannot disable tracking in derived context.")
+    }
+
+    if (!target?.tracking) return run()
+
+    target.tracking = false
+    try {
+        return run()
+    } finally {
+        target.tracking = true
     }
 }
