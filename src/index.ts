@@ -1,5 +1,4 @@
 import {
-    DerivedNode,
     disposeEffect,
     EffectNode,
     getValue,
@@ -14,8 +13,8 @@ import {
 
 export { batch, untracked } from "./hazmat"
 
-export abstract class ReadonlyAtom<out T> {
-    protected abstract readonly _node: SourceNode<T>
+export class ReadonlyAtom<out T> {
+    constructor(readonly _node: SourceNode<T>) {}
 
     get(): T {
         return getValue(this._node)
@@ -23,15 +22,12 @@ export abstract class ReadonlyAtom<out T> {
 }
 
 export class Atom<in out T> extends ReadonlyAtom<T> {
-    protected readonly _node: ValueNode<T>
-
     constructor(value: T) {
-        super()
-        this._node = makeValueNode(value)
+        super(makeValueNode(value))
     }
 
     set(value: T): T {
-        return setValue(this._node, value)
+        return setValue(this._node as ValueNode<T>, value)
     }
 
     update(map: (value: T) => T): T {
@@ -44,17 +40,8 @@ export function atom<T>(value: T): Atom<T> {
     return new Atom(value)
 }
 
-export class DerivedAtom<out T> extends ReadonlyAtom<T> {
-    protected readonly _node: DerivedNode<T>
-
-    constructor(derive: () => T) {
-        super()
-        this._node = makeDerivedNode(derive)
-    }
-}
-
-export function derivedAtom<T>(derive: () => T): DerivedAtom<T> {
-    return new DerivedAtom(derive)
+export function derivedAtom<T>(derive: () => T): ReadonlyAtom<T> {
+    return new ReadonlyAtom(makeDerivedNode(derive))
 }
 
 export type Destructor = () => void
