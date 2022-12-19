@@ -50,10 +50,33 @@ export interface TargetCommon {
     running: boolean
 }
 
+/**
+ *                  setValue
+ *                during batch
+ * +-----------+ -------------> +-------------+
+ * | validated |                | uncommitted |
+ * +-----------+ <------------- +-------------+
+ *                   commit
+ */
 export interface ValueNode<T = unknown> extends SourceCommon<T> {
     type: NodeType.VALUE
 }
 
+/**
+ *                +----------+
+ *       +------- | disposed | <-------+
+ *       |        +----------+         |
+ *       |                             |          revalidate
+ *       v       invalidate src        |         during batch
+ * +-----------+ -------------> +-------------+ -------------> +-------------+
+ * | validated |                | invalidated |                | uncommitted |
+ * +-----------+ <------------- +-------------+ <------------- +-------------+
+ *       ^         revalidate                      rollback           |
+ *       |      uninvalidate src               (invalidate src)       |
+ *       |                                    (uninvalidate src)      |
+ *       +------------------------------------------------------------+
+ *                                  commit
+ */
 export interface DerivedNode<T = unknown> extends SourceCommon<Cache<T>>, TargetCommon {
     type: NodeType.DERIVED
     /** function to derive a new value */
@@ -62,6 +85,14 @@ export interface DerivedNode<T = unknown> extends SourceCommon<Cache<T>>, Target
     rollback: boolean
 }
 
+/**
+ *               invalidate src
+ * +-----------+ -------------> +-------------+
+ * | validated |                | invalidated |
+ * +-----------+ <------------- +-------------+
+ *                  runEffect
+ *              uninvalidate src
+ */
 export interface EffectNode extends TargetCommon {
     type: NodeType.EFFECT
     /** callback to notify the effect that the tracked sources have changed */
