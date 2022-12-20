@@ -80,3 +80,26 @@ export class Effect {
 export function effect(sideEffect: () => void | Destructor): Effect {
     return new Effect(sideEffect)
 }
+
+
+// -------------
+// --- async ---
+// -------------
+
+type UnwrapValue<N> = N extends ReadonlyAtom<infer T> ? T : N;
+
+export function asyncDerivedAtom<T, Dependencies extends readonly ReadonlyAtom<unknown>[]>(...dependencies: Dependencies): (derive: (...args: unknown[]) => Promise<T>) => ReadonlyAtom<T | undefined>{
+    return derived => {
+        const resultAtom = atom<T | undefined>(undefined);
+        effect(() => {
+            // TODO: backpressure handling
+            // TODO: type safety for input
+            const input = dependencies.map(dep => dep.get());
+            derived(...input).then(result => {
+                resultAtom.set(result);
+            });
+        });
+        return resultAtom;
+    }
+}
+
