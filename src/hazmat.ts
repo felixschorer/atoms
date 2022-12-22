@@ -209,16 +209,12 @@ export function makeEffectNode(notify: () => void) {
     return node
 }
 
-function isInvalidated(target: TargetNode): boolean {
+export function isInvalidated(target: TargetNode): boolean {
     return target.invalidatedSourcesCount > 0
 }
 
-function isUncommitted(source: SourceNode): boolean {
+export function isUncommitted(source: SourceNode): boolean {
     return source.value !== source.committedValue
-}
-
-function isInvalidatedOrUncommitted(source: SourceNode): boolean {
-    return isUncommitted(source) || (source.type === NodeType.DERIVED && isInvalidated(source))
 }
 
 export function setValue<T>(valueNode: ValueNode<T>, value: T): T {
@@ -405,7 +401,10 @@ function rollback(derived: DerivedNode): void {
         derived.rollback = false
         derived.invalidatedSourcesCount = 0
         for (const upstream of derived.sources) {
-            if (isInvalidatedOrUncommitted(upstream)) {
+            if (
+                isUncommitted(upstream) ||
+                (upstream.type === NodeType.DERIVED && isInvalidated(upstream))
+            ) {
                 derived.invalidatedSourcesCount++
             }
         }
