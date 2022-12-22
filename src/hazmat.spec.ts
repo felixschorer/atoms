@@ -30,20 +30,23 @@ describe("hazardous materials", () => {
         it("should dispose the invalidated derived nodes", () => {
             const s = makeValueNode(1)
             const d1 = makeDerivedNode(() => getValue(s))
-            const d2 = makeDerivedNode(() => getValue(s))
-            const d3 = makeDerivedNode(() => getValue(d1) + getValue(d2))
+            const d2 = makeDerivedNode(() => getValue(d1))
+            const d3 = makeDerivedNode(() => getValue(d2))
+            const d4 = makeDerivedNode(() => getValue(d2) + getValue(d3))
 
-            // initialize d1, d2, d3
-            getValue(d3)
+            // initialize d1, d2, d3, d4
+            getValue(d4)
             expect(d1.value.value).toBe(1)
             expect(d2.value.value).toBe(1)
-            expect(d3.value.value).toBe(2)
+            expect(d3.value.value).toBe(1)
+            expect(d4.value.value).toBe(2)
 
-            // invalidate d1, d2, d3
+            // invalidate d1, d2, d3, d4
             setValue(s, 2)
             expect(d1.value.type).toBe(CacheType.UNINITIALIZED)
             expect(d2.value.type).toBe(CacheType.UNINITIALIZED)
             expect(d3.value.type).toBe(CacheType.UNINITIALIZED)
+            expect(d4.value.type).toBe(CacheType.UNINITIALIZED)
         })
     })
 
