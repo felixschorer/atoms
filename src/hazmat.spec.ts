@@ -1,4 +1,5 @@
 import {
+    CacheType,
     getValue,
     makeDerivedNode,
     makeEffectNode,
@@ -8,6 +9,44 @@ import {
 } from "./hazmat"
 
 describe("hazardous materials", () => {
+    describe("invalidation", () => {
+        it("should dispose the invalidated derived node", () => {
+            const s = makeValueNode(1)
+            const d = makeDerivedNode(() => getValue(s))
+
+            // initialize d
+            getValue(d)
+            expect(d.value.value).toBe(1)
+            expect(d.sources).toEqual([s])
+            expect(s.targets).toEqual(new Map([[d.weakRef, 1]]))
+
+            // invalidate s
+            setValue(s, 2)
+            expect(d.value.type).toBe(CacheType.UNINITIALIZED)
+            expect(d.sources).toEqual([])
+            expect(s.targets).toEqual(new Map([]))
+        })
+
+        it("should dispose the invalidated derived nodes", () => {
+            const s = makeValueNode(1)
+            const d1 = makeDerivedNode(() => getValue(s))
+            const d2 = makeDerivedNode(() => getValue(s))
+            const d3 = makeDerivedNode(() => getValue(d1) + getValue(d2))
+
+            // initialize d1, d2, d3
+            getValue(d3)
+            expect(d1.value.value).toBe(1)
+            expect(d2.value.value).toBe(1)
+            expect(d3.value.value).toBe(2)
+
+            // invalidate d1, d2, d3
+            setValue(s, 2)
+            expect(d1.value.type).toBe(CacheType.UNINITIALIZED)
+            expect(d2.value.type).toBe(CacheType.UNINITIALIZED)
+            expect(d3.value.type).toBe(CacheType.UNINITIALIZED)
+        })
+    })
+
     it("should notify the effect on changes", () => {
         const callback = jest.fn()
 

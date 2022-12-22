@@ -309,13 +309,16 @@ function invalidate(source: SourceNode): void {
         }
         if (target.type === NodeType.DERIVED) {
             invalidate(target)
-            checkForDisposal(target)
         } else {
             UPDATE.invalidatedEffects.add(target)
         }
         // Increase count only after recursively calling invalidate.
         // Otherwise, DerivedNodes won't pass the above isInvalidated check.
         target.invalidatedSourcesCount += subscriptionCount
+
+        if (target.type === NodeType.DERIVED) {
+            checkForDisposal(target)
+        }
     }
 }
 
