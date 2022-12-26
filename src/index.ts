@@ -8,6 +8,7 @@ import {
     runInContext,
     setValue,
     SourceNode,
+    untracked,
     ValueNode,
 } from "./hazmat"
 
@@ -82,24 +83,59 @@ export function effect(sideEffect: () => void | Destructor): Effect {
 }
 
 
-// -------------
-// --- async ---
-// -------------
+// ---------------------
+// --- subscriptions ---
+// ---------------------
+
+export interface SubscriptionOptions {
+    handleError?: (error: any) => void;
+    active?: ReadonlyAtom<boolean>;
+}
+
+export function subscribe(atoms: ReadonlyAtom<unknown>[], callback: () => void, options?: SubscriptionOptions) {
+    effect(() => {
+        atoms.forEach(atom => atom.get()); // maybe use some hazmat here?
+        if (options?.active && !options.active.get()) {
+            return;
+        }
+        untracked(() => {
+            try {
+                callback();
+            } catch (error) {
+                options?.handleError?.(error);
+            }
+        });
+    });
+}
+
+export interface SubscriptionAsyncOptions extends SubscriptionOptions {
+    backpressureType?: 'debounce' | 'skip';
+}
+
+export function subscribeAsync(atoms: ReadonlyAtom<unknown>[], callback: () => Promise<void>, options?: SubscriptionAsyncOptions) {
+    effect(() => {
+        atoms.forEach(atom => atom.get()); // maybe use some hazmat here?
+        if (options?.active && !options.active.get()) {
+            return;
+        }
+        untracked(() => {
+            // TODO backpressure
+            callback().catch(error => options?.handleError?.(error));
+        });
+    });
+}
+
+// ---------------------
+// --- derived async ---
+// ---------------------
 
 type UnwrapValue<N> = N extends ReadonlyAtom<infer T> ? T : N;
 
-export function asyncDerivedAtom<T, Dependencies extends readonly ReadonlyAtom<unknown>[]>(...dependencies: Dependencies): (derive: (...args: unknown[]) => Promise<T>) => ReadonlyAtom<T | undefined>{
-    return derived => {
-        const resultAtom = atom<T | undefined>(undefined);
-        effect(() => {
-            // TODO: backpressure handling
-            // TODO: type safety for input
-            const input = dependencies.map(dep => dep.get());
-            derived(...input).then(result => {
-                resultAtom.set(result);
-            });
-        });
-        return resultAtom;
-    }
+export function asyncDerivedAtom<T>(atoms: ReadonlyAtom<unknown>[], deriveFcn: () => Promise<T>, options?: SubscriptionAsyncOptions): ReadonlyAtom<T | undefined>{
+    const resultAtom = atom<T | undefined>(undefined);
+    subscribeAsync(atoms, async () => {
+        const result = await deriveFcn();
+        resultAtom.set(result);
+    }, options);
+    return resultAtom;
 }
-
