@@ -87,15 +87,19 @@ export function effect(sideEffect: () => void | Destructor): Effect {
 // --- subscriptions ---
 // ---------------------
 
-export interface SubscriptionOptions {
-    handleError?: (error: any) => void;
-    active?: ReadonlyAtom<boolean>;
+export class Subsription {
+    readonly active = atom(true);
 }
 
-export function subscribe(atoms: ReadonlyAtom<unknown>[], callback: () => void, options?: SubscriptionOptions) {
+export interface SubscriptionOptions {
+    handleError?: (error: any) => void;
+}
+
+export function subscribe(atoms: ReadonlyAtom<unknown>[], callback: () => void, options?: SubscriptionOptions): Subsription {
+    const subsription = new Subsription();
     effect(() => {
         atoms.forEach(atom => atom.get()); // maybe use some hazmat here?
-        if (options?.active && !options.active.get()) {
+        if (!subsription.active.get()) {
             return;
         }
         untracked(() => {
@@ -106,23 +110,46 @@ export function subscribe(atoms: ReadonlyAtom<unknown>[], callback: () => void, 
             }
         });
     });
+    return subsription;
+}
+
+export class AsyncSubsription extends Subsription {
+    constructor(readonly _processing: ReadonlyAtom<boolean>) {
+        super();
+    }
+
+    get processing(): ReadonlyAtom<boolean> {
+        return this._processing;
+    }
 }
 
 export interface SubscriptionAsyncOptions extends SubscriptionOptions {
     backpressureType?: 'debounce' | 'skip';
+    processing?: Atom<boolean>;
 }
 
-export function subscribeAsync(atoms: ReadonlyAtom<unknown>[], callback: () => Promise<void>, options?: SubscriptionAsyncOptions) {
+export function subscribeAsync(atoms: ReadonlyAtom<unknown>[], callback: () => Promise<void>, options?: SubscriptionAsyncOptions): AsyncSubsription {
+    const processing = atom(false);
+    const asyncSubsription = new AsyncSubsription(processing);
     effect(() => {
         atoms.forEach(atom => atom.get()); // maybe use some hazmat here?
-        if (options?.active && !options.active.get()) {
+        if (!asyncSubsription.active.get()) {
             return;
         }
+        processing.set(true);
         untracked(() => {
             // TODO backpressure
-            callback().catch(error => options?.handleError?.(error));
+            callback()
+                .then(() => {
+                    processing.set(true); // should be tracked
+                })
+                .catch(error => {
+                    processing.set(true); // should be tracked
+                    options?.handleError?.(error);
+                });
         });
     });
+    return asyncSubsription;
 }
 
 // ---------------------
@@ -131,11 +158,22 @@ export function subscribeAsync(atoms: ReadonlyAtom<unknown>[], callback: () => P
 
 type UnwrapValue<N> = N extends ReadonlyAtom<infer T> ? T : N;
 
-export function asyncDerivedAtom<T>(atoms: ReadonlyAtom<unknown>[], deriveFcn: () => Promise<T>, options?: SubscriptionAsyncOptions): ReadonlyAtom<T | undefined>{
+export class AsyncReadonlyAtom<T> extends AsyncSubsription {
+    constructor(readonly _result: ReadonlyAtom<T | undefined>, processing: ReadonlyAtom<boolean>) {
+        super(processing);
+    }
+
+    get value(): ReadonlyAtom<T | undefined> {
+        return this._result;
+    }
+}
+
+export function asyncDerivedAtom<T>(atoms: ReadonlyAtom<unknown>[], deriveFcn: () => Promise<T>, options?: SubscriptionAsyncOptions): AsyncReadonlyAtom<T>{
     const resultAtom = atom<T | undefined>(undefined);
-    subscribeAsync(atoms, async () => {
+    const sub = subscribeAsync(atoms, async () => {
         const result = await deriveFcn();
         resultAtom.set(result);
     }, options);
-    return resultAtom;
+    const asyncDerivedAtom = new AsyncReadonlyAtom(resultAtom, sub.processing);
+    return asyncDerivedAtom;
 }
